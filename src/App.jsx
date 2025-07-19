@@ -1,10 +1,10 @@
-// App.jsx - The Final, Real-time Version with Environment Variables
+// App.jsx - Final Version with Simplified, Direct Upload Logic
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { ethers } from 'ethers';
 import Irys from '@irys/sdk';
 
-// ✅ FIREBASE: Import Firestore functions
+// FIREBASE: Import Firestore functions
 import { initializeApp } from "firebase/app";
 import { getFirestore, collection, addDoc, query, onSnapshot, serverTimestamp, orderBy } from "firebase/firestore";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
@@ -14,10 +14,8 @@ import './App.css';
 
 import backgroundImage from './assets/background.png';
 
-// --- ✅ FIREBASE: Configuration ---
-// This now securely reads the keys from your Vercel environment
+// --- FIREBASE: Configuration ---
 const firebaseConfig = JSON.parse(import.meta.env.VITE_FIREBASE_CONFIG);
-
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'irys-meme-wall-default';
 
 // Initialize Firebase
@@ -39,7 +37,7 @@ const ResultModal = ({ title, message, txId, url, closeModal }) => (
   </div>
 );
 
-// --- Uploader Component ---
+// --- Uploader Component (Simplified) ---
 const Uploader = ({ isMemeUploader, setPage, showResultModal, userId }) => {
   const [files, setFiles] = useState([]);
   const [title, setTitle] = useState('');
@@ -83,27 +81,36 @@ const Uploader = ({ isMemeUploader, setPage, showResultModal, userId }) => {
       return;
     }
     setIsLoading(true);
+    setStatusMessage('Please approve the upload in your wallet...');
     try {
-      setStatusMessage(`Uploading to Irys...`);
-      const file = files[0]; // For memes, we only upload one
+      const file = files[0];
+      
       const tags = [{ name: 'Content-Type', value: file.type }, { name: 'App-Name', value: 'Irys-Meme-Wall-Firestore' }];
+      if (isMemeUploader) {
+          tags.push({ name: 'Title', value: title });
+      }
+
+      // The Irys SDK is smart. It will handle funding if needed, or just upload.
       const receipt = await irysInstance.uploadFile(file, { tags });
       
-      setStatusMessage(`Saving to the Meme Wall...`);
+      // This part only runs after the upload is successful
+      if (isMemeUploader) {
+        setStatusMessage(`Saving to the Meme Wall...`);
+        const memesCollectionRef = collection(db, `artifacts/${appId}/public/data/memes`);
+        await addDoc(memesCollectionRef, {
+          irysId: receipt.id,
+          title: title,
+          uploader: userId,
+          createdAt: serverTimestamp()
+        });
+      }
 
-      const memesCollectionRef = collection(db, `artifacts/${appId}/public/data/memes`);
-      await addDoc(memesCollectionRef, {
-        irysId: receipt.id,
-        title: title,
-        uploader: userId, // The currently authenticated user
-        createdAt: serverTimestamp()
-      });
-
-      showResultModal('Success', 'Your meme is now live on the wall!', receipt.id, `https://gateway.irys.xyz/${receipt.id}`);
-      setPage('meme-wall');
+      showResultModal('Success', 'Your file has been permanently uploaded!', receipt.id, `https://gateway.irys.xyz/${receipt.id}`);
+      setPage(isMemeUploader ? 'meme-wall' : 'home');
 
     } catch (e) {
       showResultModal('Error', `Upload failed: ${e.message}`);
+      setStatusMessage('Upload failed or was rejected.');
     } finally {
       setIsLoading(false);
     }
@@ -114,11 +121,20 @@ const Uploader = ({ isMemeUploader, setPage, showResultModal, userId }) => {
       <div className="wall-header"><button className="action-button" onClick={() => setPage('home')} disabled={isLoading}>← Back</button></div>
       <div className="uploader-box">
         <h2>{isMemeUploader ? 'Upload Your MEME' : 'Upload Files'}</h2>
-        <label htmlFor="file-input" className="file-input-label">Choose File(s)</label>
-        <input id="file-input" type="file" className="hidden" multiple={!isMemeUploader} onChange={handleFileSelection} />
-        {files.length > 0 && (<div className="text-left mt-4 p-2 bg-gray-100 rounded"><p className="font-semibold">Selected:</p><ul className="list-disc list-inside text-sm">{files.map((file, i) => <li key={i}>{file.name}</li>)}</ul></div>)}
-        {isMemeUploader && (<input type="text" placeholder="Enter meme title..." value={title} onChange={(e) => setTitle(e.target.value)} className="w-full p-3 border border-gray-300 rounded-md my-4" />)}
-        <div className="mt-6">{!irysInstance ? (<button onClick={connectWallet} disabled={isLoading} className="action-button w-full">{isLoading ? 'Connecting...' : 'Connect Wallet'}</button>) : (<button onClick={handleUpload} disabled={isLoading || files.length === 0} className="action-button secondary-button w-full">{isLoading ? 'Uploading...' : 'Upload Now'}</button>)}</div>
+        
+        {!irysInstance ? (
+          <button onClick={connectWallet} disabled={isLoading} className="action-button w-full">{isLoading ? 'Connecting...' : 'Connect Wallet'}</button>
+        ) : (
+          <>
+            <label htmlFor="file-input" className="file-input-label">Choose File(s)</label>
+            <input id="file-input" type="file" className="hidden" multiple={!isMemeUploader} onChange={handleFileSelection} />
+            {files.length > 0 && (<div className="text-left mt-4 p-2 bg-gray-100 rounded"><p className="font-semibold">Selected:</p><ul className="list-disc list-inside text-sm">{files.map((file, i) => <li key={i}>{file.name}</li>)}</ul></div>)}
+            {isMemeUploader && (<input type="text" placeholder="Enter meme title..." value={title} onChange={(e) => setTitle(e.target.value)} className="w-full p-3 border border-gray-300 rounded-md my-4" />)}
+            <div className="mt-6">
+              <button onClick={handleUpload} disabled={isLoading || files.length === 0} className="action-button secondary-button w-full">{isLoading ? 'Processing...' : 'Upload Now'}</button>
+            </div>
+          </>
+        )}
         <p className="mt-4 text-gray-600">{statusMessage}</p>
       </div>
     </div>
