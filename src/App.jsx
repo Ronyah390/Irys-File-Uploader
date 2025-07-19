@@ -1,9 +1,32 @@
+// App.jsx - The Final, Real-time Version
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { ethers } from 'ethers';
 import Irys from '@irys/sdk';
-import './App.css';
+
+// ✅ FIREBASE: Import Firestore functions
+import { initializeApp } from "firebase/app";
+import { getFirestore, collection, addDoc, query, onSnapshot, serverTimestamp } from "firebase/firestore";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
+
+
+import './App.css'; 
 
 import backgroundImage from './assets/background.png';
+
+// --- ✅ FIREBASE: Configuration ---
+// This configuration is provided by the environment.
+const firebaseConfig = typeof __firebase_config !== 'undefined' 
+    ? JSON.parse(__firebase_config) 
+    : { apiKey: "DEMO_KEY", authDomain: "DEMO.firebaseapp.com", projectId: "DEMO_PROJECT" };
+
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'irys-meme-wall-default';
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const auth = getAuth(app);
+
 
 // --- Reusable Result/Success Modal ---
 const ResultModal = ({ title, message, txId, url, closeModal }) => (
@@ -19,18 +42,15 @@ const ResultModal = ({ title, message, txId, url, closeModal }) => (
 );
 
 // --- Uploader Component ---
-const Uploader = ({ isMemeUploader, setPage, showResultModal, addNewMeme }) => {
+const Uploader = ({ isMemeUploader, setPage, showResultModal, userId }) => {
   const [files, setFiles] = useState([]);
   const [title, setTitle] = useState('');
   const [irysInstance, setIrysInstance] = useState(null);
   const [statusMessage, setStatusMessage] = useState('Connect wallet to begin.');
   const [isLoading, setIsLoading] = useState(false);
-  const [signerAddress, setSignerAddress] = useState('');
-  const [uploadResults, setUploadResults] = useState([]);
 
   const handleFileSelection = (e) => {
     setFiles(Array.from(e.target.files));
-    setUploadResults([]);
   };
 
   const connectWallet = async () => {
@@ -43,9 +63,6 @@ const Uploader = ({ isMemeUploader, setPage, showResultModal, addNewMeme }) => {
       setStatusMessage('Connecting to MetaMask...');
       const provider = new ethers.providers.Web3Provider(window.ethereum);
       await provider.send("eth_requestAccounts", []);
-      const signer = provider.getSigner();
-      const address = await signer.getAddress();
-      setSignerAddress(address);
       const irys = new Irys({ network: "mainnet", token: "matic", wallet: { provider, name: "ethersv5" } });
       await irys.ready();
       setIrysInstance(irys);
@@ -68,30 +85,25 @@ const Uploader = ({ isMemeUploader, setPage, showResultModal, addNewMeme }) => {
       return;
     }
     setIsLoading(true);
-    setUploadResults([]);
     try {
-      const totalSize = files.reduce((sum, file) => sum + file.size, 0);
-      setStatusMessage(`Calculating cost...`);
-      const price = await irysInstance.getPrice(totalSize);
-      const balance = await irysInstance.getBalance();
-      if (balance.lt(price)) {
-        setStatusMessage('Funding Irys node...');
-        await irysInstance.fund(price);
-      }
-      const results = [];
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        setStatusMessage(`Uploading file ${i + 1} of ${files.length}...`);
-        const tags = isMemeUploader ? [{ name: 'Content-Type', value: file.type }, { name: 'App-Name', value: 'Irys-Meme-Wall-Pro' }, { name: 'Title', value: title }] : [{ name: 'Content-Type', value: file.type }];
-        const receipt = await irysInstance.uploadFile(file, { tags });
-        const newMemeData = { id: receipt.id, title, owner: signerAddress };
-        results.push({ ...newMemeData, name: file.name, url: `https://gateway.irys.xyz/${receipt.id}` });
-        if (isMemeUploader) {
-          addNewMeme(newMemeData);
-        }
-      }
-      setUploadResults(results);
-      setStatusMessage(`${files.length} file(s) uploaded successfully!`);
+      setStatusMessage(`Uploading to Irys...`);
+      const file = files[0]; // For memes, we only upload one
+      const tags = [{ name: 'Content-Type', value: file.type }, { name: 'App-Name', value: 'Irys-Meme-Wall-Firestore' }];
+      const receipt = await irysInstance.uploadFile(file, { tags });
+      
+      setStatusMessage(`Saving to the Meme Wall...`);
+
+      const memesCollectionRef = collection(db, `artifacts/${appId}/public/data/memes`);
+      await addDoc(memesCollectionRef, {
+        irysId: receipt.id,
+        title: title,
+        uploader: userId,
+        createdAt: serverTimestamp()
+      });
+
+      showResultModal('Success', 'Your meme is now live on the wall!', receipt.id, `https://gateway.irys.xyz/${receipt.id}`);
+      setPage('meme-wall');
+
     } catch (e) {
       showResultModal('Error', `Upload failed: ${e.message}`);
     } finally {
@@ -110,40 +122,28 @@ const Uploader = ({ isMemeUploader, setPage, showResultModal, addNewMeme }) => {
         {isMemeUploader && (<input type="text" placeholder="Enter meme title..." value={title} onChange={(e) => setTitle(e.target.value)} className="w-full p-3 border border-gray-300 rounded-md my-4" />)}
         <div className="mt-6">{!irysInstance ? (<button onClick={connectWallet} disabled={isLoading} className="action-button w-full">{isLoading ? 'Connecting...' : 'Connect Wallet'}</button>) : (<button onClick={handleUpload} disabled={isLoading || files.length === 0} className="action-button secondary-button w-full">{isLoading ? 'Uploading...' : 'Upload Now'}</button>)}</div>
         <p className="mt-4 text-gray-600">{statusMessage}</p>
-        {uploadResults.length > 0 && (<div className="text-left mt-6 p-4 bg-green-100 rounded border border-green-300"><h3 className="font-bold text-lg text-green-800">Upload Complete!</h3>{uploadResults.map(result => (<div key={result.id} className="mt-2"><p className="font-semibold">{result.name}</p><a href={result.url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 break-all">{result.url}</a></div>))}</div>)}
       </div>
     </div>
   );
 };
 
 // --- Skeleton Loader ---
-const SkeletonCard = () => (<div className="skeleton-card"><div className="skeleton-image"></div><div className="p-4"><div className="skeleton-text"></div><div className="skeleton-text short"></div></div></div>);
+const SkeletonCard = () => (<div className="skeleton-card"><div className="skeleton-image"></div><div className="p-4"><div className="skeleton-text"></div></div></div>);
 
 // --- Meme Wall Page ---
-const MemeWallPage = ({ setPage, memes, isLoading, fetchMemes, viewMeme }) => {
-  useEffect(() => {
-    if (memes.length === 0) fetchMemes();
-  }, [memes.length, fetchMemes]);
-
+const MemeWallPage = ({ setPage, memes, isLoading, viewMeme }) => {
   return (
     <div className="page meme-wall-page">
       <div className="wall-header">
         <button className="action-button" onClick={() => setPage('home')}>← Back</button>
-        <h1 className="main-title text-3xl">🔥 MEME Wall 🔥</h1>
-        <button className="action-button secondary-button" onClick={fetchMemes}>Refresh</button>
+        <h1 className="wall-title">🔥 MEME Wall 🔥</h1>
+        <div></div> {/* Spacer */}
       </div>
       <div className="meme-grid">
-        {isLoading ? (Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)) : (memes.length > 0 ? memes.map(meme => (
-          <div key={meme.id} className="meme-card">
-            <img src={`https://gateway.irys.xyz/${meme.id}`} alt={meme.title} className="meme-image" onError={(e) => e.target.src = 'https://placehold.co/320x300/252525/fff?text=Error'} />
-            <div className="meme-card-content">
-              <h3 className="meme-title">{meme.title}</h3>
-              <p className="meme-owner">by: {`${meme.owner.substring(0, 6)}...${meme.owner.substring(meme.owner.length - 4)}`}</p>
-              <div className="meme-card-footer">
-                {/* ✅ This button now navigates internally */}
-                <button onClick={() => viewMeme(meme)} className="action-button w-full">View Meme</button>
-              </div>
-            </div>
+        {isLoading && memes.length === 0 ? (Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)) : (memes.length > 0 ? memes.map(meme => (
+          <div key={meme.id} className="meme-card" onClick={() => viewMeme(meme)}>
+            <img src={`https://gateway.irys.xyz/${meme.irysId}`} alt={meme.title} className="meme-image" onError={(e) => e.target.src = 'https://placehold.co/320x300/252525/fff?text=Error'} />
+            <div className="meme-card-content"><h3 className="meme-title">{meme.title}</h3></div>
           </div>
         )) : <p className="col-span-full text-xl text-white">No memes found. Be the first to upload one!</p>)}
       </div>
@@ -151,76 +151,63 @@ const MemeWallPage = ({ setPage, memes, isLoading, fetchMemes, viewMeme }) => {
   );
 };
 
-// --- ✅ NEW: Meme Viewer Page ---
+// --- Meme Viewer Page ---
 const MemeViewerPage = ({ setPage, meme }) => {
-  if (!meme) return null; // Should not happen, but a good safeguard
-  const gatewayUrl = `https://gateway.irys.xyz/${meme.id}`;
-  const explorerUrl = `https://viewblock.io/arweave/tx/${meme.id}`;
-
+  if (!meme) return null;
+  const gatewayUrl = `https://gateway.irys.xyz/${meme.irysId}`;
+  const explorerUrl = `https://viewblock.io/arweave/tx/${meme.irysId}`;
   return (
-    <div className="page">
-       <div className="wall-header">
-        <button className="action-button" onClick={() => setPage('meme-wall')}>← Back to Wall</button>
-      </div>
-      <div className="w-full max-w-4xl mt-16">
-        <h1 className="main-title text-4xl mb-4">{meme.title}</h1>
-        <img src={gatewayUrl} alt={meme.title} className="w-full rounded-lg shadow-2xl border-4 border-white" />
-        <p className="meme-owner mt-4 text-lg">Uploaded by: {meme.owner}</p>
-        <div className="flex justify-center gap-4 mt-6">
-          <a href={gatewayUrl} target="_blank" rel="noopener noreferrer" className="action-button">View Original</a>
-          <a href={explorerUrl} target="_blank" rel="noopener noreferrer" className="action-button secondary-button">View on Explorer</a>
-        </div>
-      </div>
-    </div>
+    <div className="page"><div className="wall-header"><button className="action-button" onClick={() => setPage('meme-wall')}>← Back to Wall</button></div><div className="w-full max-w-4xl mt-16"><h1 className="main-title text-4xl mb-4">{meme.title}</h1><img src={gatewayUrl} alt={meme.title} className="w-full rounded-lg shadow-2xl border-4 border-white" /><p className="meme-owner mt-4 text-lg">Uploaded by: {meme.uploader.substring(0, 8)}...</p><div className="flex justify-center gap-4 mt-6"><a href={gatewayUrl} target="_blank" rel="noopener noreferrer" className="action-button">View Original</a><a href={explorerUrl} target="_blank" rel="noopener noreferrer" className="action-button secondary-button">View on Explorer</a></div></div></div>
   );
 };
 
-
 // --- Home Page ---
 const HomePage = ({ setPage }) => (
-  <div className="page">
-    <h1 className="main-title">Irys MEME Central</h1>
-    <p className="subtitle">Upload, view, and share memes permanently on the decentralized cloud.</p>
-    <div className="button-group">
-      <button className="action-button" onClick={() => setPage('upload-file')}>File Upload to Irys</button>
-      <button className="action-button secondary-button" onClick={() => setPage('upload-meme')}>Upload Your MEME</button>
-      <button className="action-button" onClick={() => setPage('meme-wall')}>View MEME Wall</button>
-    </div>
-  </div>
+  <div className="page"><h1 className="main-title">Irys MEME Central</h1><p className="subtitle">Upload, view, and share memes permanently on the decentralized cloud.</p><div className="button-group"><button className="action-button" onClick={() => setPage('upload-file')}>File Upload to Irys</button><button className="action-button secondary-button" onClick={() => setPage('upload-meme')}>Upload Your MEME</button><button className="action-button" onClick={() => setPage('meme-wall')}>View MEME Wall</button></div></div>
 );
 
-// --- Main App Component (Controller) ---
+// --- Main App Component ---
 function App() {
   const [page, setPage] = useState('home');
   const [resultModalInfo, setResultModalInfo] = useState(null);
+  const [selectedMeme, setSelectedMeme] = useState(null);
   const [memes, setMemes] = useState([]);
-  const [isLoadingMemes, setIsLoadingMemes] = useState(false);
-  const [selectedMeme, setSelectedMeme] = useState(null); // ✅ State for the selected meme
+  const [isLoadingMemes, setIsLoadingMemes] = useState(true);
+  const [userId, setUserId] = useState(null);
 
-  const addNewMeme = (newMeme) => {
-    setMemes(prevMemes => [newMeme, ...prevMemes]);
-  };
+  useEffect(() => {
+    onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setUserId(user.uid);
+      } else {
+        signInAnonymously(auth).catch(error => console.error("Anonymous sign-in failed:", error));
+      }
+    });
 
-  const fetchMemes = useCallback(async () => {
-    setIsLoadingMemes(true);
-    const query = `query { transactions(tags: [{ name: "App-Name", values: ["Irys-Meme-Wall-Pro"] }], first: 100, sort: HEIGHT_DESC) { edges { node { id, owner { address }, tags { name, value } } } } }`;
-    try {
-      const res = await fetch('https://node2.irys.xyz/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query }) });
-      const json = await res.json();
-      const memeData = json.data.transactions.edges.map(({ node }) => ({ id: node.id, title: node.tags.find(tag => tag.name === 'Title')?.value || 'Untitled', owner: node.owner.address }));
-      setMemes(memeData);
-    } catch (error) {
-      console.error("Failed to fetch memes:", error);
-    } finally {
+    const memesCollectionRef = collection(db, `artifacts/${appId}/public/data/memes`);
+    const q = query(memesCollectionRef);
+
+    const unsubscribe = onSnapshot(q, (querySnapshot) => {
+      const memesData = [];
+      querySnapshot.forEach((doc) => {
+        memesData.push({ id: doc.id, ...doc.data() });
+      });
+      memesData.sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+      setMemes(memesData);
       setIsLoadingMemes(false);
-    }
+    }, (error) => {
+      console.error("Error fetching memes:", error);
+      setIsLoadingMemes(false);
+    });
+
+    return () => unsubscribe();
   }, []);
+
 
   const showResultModal = (title, message, txId = null, url = null) => {
     setResultModalInfo({ title, message, txId, url });
   };
   
-  // ✅ Function to handle viewing a meme
   const viewMeme = (meme) => {
     setSelectedMeme(meme);
     setPage('meme-viewer');
@@ -228,9 +215,9 @@ function App() {
 
   const renderPage = () => {
     switch (page) {
-      case 'upload-file': return <Uploader isMemeUploader={false} setPage={setPage} showResultModal={showResultModal} addNewMeme={() => {}} />;
-      case 'upload-meme': return <Uploader isMemeUploader={true} setPage={setPage} showResultModal={showResultModal} addNewMeme={addNewMeme} />;
-      case 'meme-wall': return <MemeWallPage setPage={setPage} memes={memes} isLoading={isLoadingMemes} fetchMemes={fetchMemes} viewMeme={viewMeme} />;
+      case 'upload-file': return <Uploader isMemeUploader={false} setPage={setPage} showResultModal={showResultModal} userId={userId} />;
+      case 'upload-meme': return <Uploader isMemeUploader={true} setPage={setPage} showResultModal={showResultModal} userId={userId} />;
+      case 'meme-wall': return <MemeWallPage setPage={setPage} memes={memes} isLoading={isLoadingMemes} viewMeme={viewMeme} />;
       case 'meme-viewer': return <MemeViewerPage setPage={setPage} meme={selectedMeme} />;
       default: return <HomePage setPage={setPage} />;
     }
