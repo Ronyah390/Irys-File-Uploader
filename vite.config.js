@@ -4,8 +4,7 @@ import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import path from 'path';
 
 export default defineConfig({
-  // ✅ CRITICAL: Set this to your repository name
-  base: '/Irys-File-Uploader/', 
+  // The 'base' property has been removed. This is the fix.
 
   plugins: [
     react(),
