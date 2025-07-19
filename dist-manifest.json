@@ -1,0 +1,12 @@
+{
+"manifest": "arweave/paths",
+"version": "0.1.0",
+"paths": {
+"assets/index-Dx4xAJu1.css":{"id":"TLwpcQe0eoHPOsEHiDcW56oiTiqiqjuF3vxqSKrt-Xg"},
+"vite.svg":{"id":"LAXoXnLj5IPiPQtYIVJZI8FI7LinAzDuXoDLUvh05nI"},
+"index.html":{"id":"zIDt2-TSZaHJaCE3u7FodQsX9of5FWakL4KU73dMEGc"},
+"assets/background-VYpdb1E3.png":{"id":"jsOc2c_Tr7CZ0o4J9ilH_ztRvM-mKx5zOQ1HQ8QmyBw"},
+"assets/index-7dXBDXMo.js":{"id":"a1BEomIp3Vy-ql3VAZxuWIe3VOaEOwiyAD6JtrM1TCQ"}
+},
+"index":{"path":"index.html"}
+}
